@@ -7,8 +7,7 @@ CREATE TABLE IF NOT EXISTS bills (
     bill_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     paper_total DECIMAL(12,2),
     calculated_total DECIMAL(12,2) NOT NULL,
-    verification_status VARCHAR(20),
-    notes VARCHAR(255)
+    verification_status VARCHAR(20)
 );
 
 CREATE TABLE IF NOT EXISTS bill_items (
@@ -22,6 +21,3 @@ CREATE TABLE IF NOT EXISTS bill_items (
         REFERENCES bills(id)
         ON DELETE CASCADE
 );
-
--- If you already created the old "bills" table, run this once instead:
--- ALTER TABLE bills ADD COLUMN notes VARCHAR(255);
