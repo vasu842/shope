@@ -1,72 +1,11 @@
 let items = [];
 
 function money(value) {
-    return Math.round(
-        (Number(value) + Number.EPSILON) * 100
-    ) / 100;
+    return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
 
 function formatMoney(value) {
     return money(value).toFixed(2);
-}
-
-// Add item
-function addItem(name = "", quantity = 1, price = 0) {
-    items.push({
-        name,
-        quantity,
-        price
-    });
-
-    renderItems();
-}
-
-// Display items
-function renderItems() {
-    const body = document.getElementById("itemsBody");
-
-    body.innerHTML = "";
-
-    items.forEach((item, index) => {
-        const row = document.createElement("tr");
-
-        row.innerHTML = `
-            <td>
-                <input value="${escapeHtml(item.name)}"
-                    aria-label="Item name"
-                    onchange="updateItem(${index}, 'name', this.value)">
-            </td>
-
-            <td>
-                <input type="number"
-                    min="0.001"
-                    step="0.001"
-                    value="${item.quantity}"
-                    onchange="updateItem(${index}, 'quantity', this.value)">
-            </td>
-
-            <td>
-                <input type="number"
-                    min="0"
-                    step="0.01"
-                    value="${item.price}"
-                    onchange="updateItem(${index}, 'price', this.value)">
-            </td>
-
-            <td>
-                ₹${formatMoney(item.quantity * item.price)}
-            </td>
-
-            <td>
-                <button class="delete-btn"
-                    onclick="removeItem(${index})">X</button>
-            </td>
-        `;
-
-        body.appendChild(row);
-    });
-
-    updateTotal();
 }
 
 function escapeHtml(value) {
@@ -79,6 +18,50 @@ function escapeHtml(value) {
     })[character]);
 }
 
+// ---------- Item table ----------
+
+function addItem(name = "", quantity = 1, price = 0) {
+    items.push({ name, quantity, price });
+    renderItems();
+}
+
+function renderItems() {
+    const body = document.getElementById("itemsBody");
+    body.innerHTML = "";
+
+    items.forEach((item, index) => {
+        const row = document.createElement("tr");
+
+        row.innerHTML = `
+            <td>
+                <input value="${escapeHtml(item.name)}" aria-label="Item name"
+                    onchange="updateItem(${index}, 'name', this.value)">
+            </td>
+            <td>
+                <input type="number" min="0.001" step="0.001"
+                    value="${item.quantity}" aria-label="Quantity"
+                    onchange="updateItem(${index}, 'quantity', this.value)">
+            </td>
+            <td>
+                <input type="number" min="0" step="0.01"
+                    value="${item.price}" aria-label="Price"
+                    onchange="updateItem(${index}, 'price', this.value)">
+            </td>
+            <td id="amount-${index}">
+                ₹${formatMoney(item.quantity * item.price)}
+            </td>
+            <td>
+                <button class="delete-btn" onclick="removeItem(${index})">X</button>
+            </td>
+        `;
+
+        body.appendChild(row);
+    });
+
+    updateTotal();
+}
+
+// Updates only the amount and total, so typing focus is not lost
 function updateItem(index, key, value) {
     if (key === "name") {
         items[index].name = value;
@@ -86,7 +69,13 @@ function updateItem(index, key, value) {
         items[index][key] = Number(value);
     }
 
-    renderItems();
+    const cell = document.getElementById("amount-" + index);
+    if (cell) {
+        cell.textContent =
+            "₹" + formatMoney(items[index].quantity * items[index].price);
+    }
+
+    updateTotal();
 }
 
 function removeItem(index) {
@@ -98,63 +87,133 @@ function calculateTotal() {
     return money(
         items.reduce(
             (sum, item) =>
-                sum + Number(item.quantity) * Number(item.price),
+                sum + money(Number(item.quantity) * Number(item.price)),
             0
         )
     );
 }
 
 function updateTotal() {
-    document.getElementById("total").textContent =
-        formatMoney(calculateTotal());
-
+    document.getElementById("total").textContent = formatMoney(calculateTotal());
     verifyTotal();
 }
 
-// Verify paper amount
-function verifyTotal() {
-    const input = document.getElementById("paperTotal").value;
+// Explain WHY the totals differ (paperDiff = paper - calculated)
+function getHints(diff, calculated) {
+    const hints = [];
+    const abs = Math.abs(diff);
+
+    // GST / tax added on the paper bill
+    if (diff > 0 && calculated > 0) {
+        [5, 12, 18, 28].forEach(rate => {
+            const tax = money(calculated * rate / 100);
+            if (Math.abs(tax - diff) < 1) {
+                hints.push("Difference matches " + rate + "% GST (₹" +
+                    formatMoney(tax) + "). The paper total may include tax.");
+            }
+        });
+    }
+
+    if (diff > 0) {
+        hints.push("An item worth about ₹" + formatMoney(abs) +
+            " may be missing from the table.");
+    }
+
+    if (diff < 0) {
+        items.forEach(item => {
+            const q = Number(item.quantity);
+            const price = Number(item.price);
+            const amount = money(q * price);
+
+            if (Math.abs(amount - abs) < 0.51) {
+                hints.push('"' + (item.name || "Unnamed item") + '" (₹' +
+                    formatMoney(amount) + ") may be extra or duplicated.");
+            }
+
+            if (q > 1 && Math.abs(money((q - 1) * price) - abs) < 0.51) {
+                hints.push('"' + (item.name || "Unnamed item") +
+                    '": the price may already be the line amount, so ' +
+                    "quantity is counted twice.");
+            }
+        });
+
+        if (calculated > 0) {
+            const pct = abs / calculated * 100;
+            if (pct >= 1 && pct <= 50) {
+                hints.push("The paper total is " + pct.toFixed(1) +
+                    "% lower. A discount may have been applied.");
+            }
+        }
+    }
+
+    hints.push("Check each item's quantity and price against the paper bill.");
+    return hints;
+}
+
+function setVerification(kind, message, hints = []) {
     const result = document.getElementById("verification");
 
-    if (input === "") {
-        result.textContent =
-            "Enter the total printed on the paper bill.";
+    result.className = kind;          // neutral | ok | warn | bad
+    result.textContent = message;
 
-        result.style.color = "#475569";
+    if (hints.length > 0) {
+        const list = document.createElement("ul");
+        hints.forEach(text => {
+            const li = document.createElement("li");
+            li.textContent = text;
+            list.appendChild(li);
+        });
+        result.appendChild(list);
+    }
+}
+
+// Compare the paper total with the calculated total
+function verifyTotal() {
+    const input = document.getElementById("paperTotal").value;
+
+    if (input === "") {
+        setVerification("neutral", "Enter the total printed on the paper bill.");
         return;
     }
 
     const paper = Number(input);
 
     if (!Number.isFinite(paper) || paper < 0) {
-        result.textContent = "Enter a valid paper total.";
-        result.style.color = "#dc2626";
+        setVerification("bad", "Enter a valid paper total.");
         return;
     }
 
     const calculated = calculateTotal();
+    const diff = money(paper - calculated);
+    const abs = Math.abs(diff);
 
-    if (Math.abs(paper - calculated) < 0.01) {
-        result.textContent =
-            "✓ MATCH — Both totals are ₹" +
-            formatMoney(calculated);
+    if (abs < 0.01) {
+        setVerification("ok",
+            "✓ MATCH — Both totals are ₹" + formatMoney(calculated));
 
-        result.style.color = "#15803d";
+    } else if (abs < 1) {
+        setVerification("warn",
+            "≈ ROUNDING — Paper: ₹" + formatMoney(paper) +
+            " | Calculated: ₹" + formatMoney(calculated) +
+            " | Difference: ₹" + formatMoney(abs) +
+            " (looks like bill rounding)");
+
     } else {
-        result.textContent =
-            "⚠ MISMATCH — Paper: ₹" +
-            formatMoney(paper) +
-            " | Calculated: ₹" +
-            formatMoney(calculated);
-
-        result.style.color = "#dc2626";
+        setVerification("bad",
+            "⚠ MISMATCH — Paper: ₹" + formatMoney(paper) +
+            " | Calculated: ₹" + formatMoney(calculated) +
+            " | Difference: ₹" + formatMoney(abs) +
+            (diff > 0 ? " (paper is higher)" : " (calculated is higher)"),
+            getHints(diff, calculated));
     }
 }
 
-// OCR scan
+// ---------- OCR ----------
+
 async function scanBill() {
     const file = document.getElementById("billImage").files[0];
     const status = document.getElementById("scanStatus");
+    const button = document.getElementById("scanBtn");
 
     if (!file) {
         alert("Please choose a bill image.");
@@ -171,6 +230,7 @@ async function scanBill() {
         return;
     }
 
+    button.disabled = true;
     status.textContent = "Scanning bill... Please wait.";
 
     try {
@@ -186,82 +246,115 @@ async function scanBill() {
             }
         });
 
-        document.getElementById("ocrText").value =
-            result.data.text;
-
-        status.textContent =
-            "Scan completed. Review the text and extract items.";
+        document.getElementById("ocrText").value = result.data.text;
+        status.textContent = "Scan completed. Review the text and extract items.";
 
     } catch (error) {
         status.textContent = "Scanning failed. Try a clearer image.";
+    } finally {
+        button.disabled = false;
     }
 }
 
-// Extract probable items from OCR text.
-// Receipt formats vary, so always review the suggested data.
-function extractItems() {
-    const text = document.getElementById("ocrText").value;
-    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+// Normalise one OCR line: remove currency marks, fix decimal commas
+function cleanLine(line) {
+    return line
+        .replace(/₹|\brs\.?|\binr\b|\/-/gi, " ")
+        .replace(/(\d),(\d{2})(?!\d)/g, "$1.$2")   // 50,00 -> 50.00
+        .replace(/(\d),(?=\d{3}\b)/g, "$1")        // 1,250 -> 1250
+        .replace(/\s+/g, " ")
+        .trim();
+}
 
-    const found = [];
+// Extract probable items. Receipt formats vary, so always review the result.
+function extractItems() {
+    const lines = document.getElementById("ocrText").value
+        .split(/\r?\n/)
+        .map(cleanLine)
+        .filter(Boolean);
+
+    const SKIP = /\b(tax|gst|cgst|sgst|igst|discount|cash|change|round|phone|mobile|tel|invoice|bill\s*no|date|time|upi|card|thank)\b/i;
+    const TOTAL = /\b(grand\s*total|net\s*(total|amount)|total\s*amount|amount\s*due|bill\s*total|total)\b/i;
+
+    const rows = [];
     let detectedTotal = null;
 
     for (const line of lines) {
-        const totalMatch = line.match(
-            /(?:grand\s*total|net\s*total|total\s*amount|amount\s*due|bill\s*total|total)\s*[:\-]?\s*(?:rs\.?|inr|₹)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i
-        );
+        if (/sub\s*total/i.test(line)) continue;
 
-        if (totalMatch) {
-            detectedTotal = Number(totalMatch[1].replace(/,/g, ""));
+        if (TOTAL.test(line)) {
+            const n = line.match(/\d+(?:\.\d+)?/g);
+            if (n) detectedTotal = Number(n[n.length - 1]);
             continue;
         }
 
-        const numbers = [
-            ...line.matchAll(/(?:^|\s)(\d[\d,]*(?:\.\d{1,3})?)(?=\s|$)/g)
-        ].map(match => ({
-            raw: match[1],
-            value: Number(match[1].replace(/,/g, ""))
-        }));
+        if (SKIP.test(line)) continue;
 
-        if (numbers.length === 0) continue;
+        // up to 3 trailing numbers (qty, rate, amount); the rest is the name
+        const tokens = line.split(" ");
+        const nums = [];
 
-        const last = numbers[numbers.length - 1];
-
-        if (!Number.isFinite(last.value) || last.value < 0) {
-            continue;
+        while (
+            tokens.length > 1 &&
+            nums.length < 3 &&
+            /^\d+(\.\d+)?$/.test(tokens[tokens.length - 1])
+        ) {
+            nums.unshift(Number(tokens.pop()));
         }
 
-        let name = line.slice(
-            0,
-            line.lastIndexOf(last.raw)
-        ).trim();
+        const name = tokens.join(" ").replace(/^[\d.)\-\s]+/, "").trim();
 
-        name = name.replace(/^[\d\s.)-]+/, "").trim();
+        if (!name || !/[a-z]/i.test(name) || nums.length === 0) continue;
+        if (nums.some(n => n > 100000)) continue; // phone numbers etc.
 
-        if (!name) continue;
+        if (nums.length === 1) {
+            rows.push({ name, a: { quantity: 1, price: nums[0] } });
 
-        if (/^(subtotal|tax|gst|cgst|sgst|discount|cash|change)$/i.test(name)) {
-            continue;
+        } else if (nums.length === 2) {
+            const [q, b] = nums;
+
+            if (q > 0 && q <= 100) {
+                // ambiguous: b is the unit price (a) OR the line amount (b)
+                rows.push({
+                    name,
+                    a: { quantity: q, price: b },
+                    b: { quantity: q, price: money(b / q) }
+                });
+            } else {
+                rows.push({ name, a: { quantity: 1, price: b } });
+            }
+
+        } else {
+            const [q, rate, amount] = nums;
+            const consistent = Math.abs(q * rate - amount) <= 0.51;
+
+            rows.push({
+                name,
+                a: consistent || q <= 0
+                    ? { quantity: q > 0 ? q : 1, price: rate }
+                    : { quantity: q, price: money(amount / q) }
+            });
         }
-
-        const quantity =
-            numbers.length >= 2 &&
-            numbers[0].value > 0 &&
-            numbers[0].value <= 1000
-                ? numbers[0].value
-                : 1;
-
-        const price =
-            quantity > 1 && numbers.length >= 2
-                ? money(last.value / quantity)
-                : last.value;
-
-        found.push({
-            name,
-            quantity,
-            price
-        });
     }
+
+    // choose the reading that best matches the paper total
+    const paperInput = document.getElementById("paperTotal").value;
+    const target = detectedTotal !== null
+        ? detectedTotal
+        : (paperInput !== "" ? Number(paperInput) : null);
+
+    const sum = mode => rows.reduce((s, r) => {
+        const x = r[mode] || r.a;
+        return s + x.quantity * x.price;
+    }, 0);
+
+    let mode = "a";
+    if (target !== null && Number.isFinite(target) &&
+        Math.abs(sum("b") - target) < Math.abs(sum("a") - target)) {
+        mode = "b";
+    }
+
+    const found = rows.map(r => ({ name: r.name, ...(r[mode] || r.a) }));
 
     if (found.length > 0) {
         items = found;
@@ -269,8 +362,7 @@ function extractItems() {
     }
 
     if (detectedTotal !== null && Number.isFinite(detectedTotal)) {
-        document.getElementById("paperTotal").value =
-            detectedTotal.toFixed(2);
+        document.getElementById("paperTotal").value = detectedTotal.toFixed(2);
     }
 
     verifyTotal();
@@ -282,7 +374,8 @@ function extractItems() {
     );
 }
 
-// Save bill to MySQL using Node.js API
+// ---------- Save and history ----------
+
 async function saveBill() {
     if (items.length === 0) {
         alert("Add at least one item.");
@@ -291,10 +384,8 @@ async function saveBill() {
 
     const valid = items.every(item =>
         String(item.name).trim() !== "" &&
-        Number.isFinite(Number(item.quantity)) &&
-        Number(item.quantity) > 0 &&
-        Number.isFinite(Number(item.price)) &&
-        Number(item.price) >= 0
+        Number.isFinite(Number(item.quantity)) && Number(item.quantity) > 0 &&
+        Number.isFinite(Number(item.price)) && Number(item.price) >= 0
     );
 
     if (!valid) {
@@ -302,33 +393,28 @@ async function saveBill() {
         return;
     }
 
-    const paperValue =
-        document.getElementById("paperTotal").value;
+    const paperValue = document.getElementById("paperTotal").value;
+    const paperTotal = paperValue === "" ? null : Number(paperValue);
 
-    const paperTotal =
-        paperValue === "" ? null : Number(paperValue);
-
-    if (
-        paperTotal !== null &&
-        (!Number.isFinite(paperTotal) || paperTotal < 0)
-    ) {
+    if (paperTotal !== null && (!Number.isFinite(paperTotal) || paperTotal < 0)) {
         alert("Enter a valid paper total.");
         return;
     }
 
+    const notes = document.getElementById("notes").value.trim();
+
     try {
         const response = await fetch("/api/bills", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 items: items.map(item => ({
-                    name: item.name.trim(),
+                    name: String(item.name).trim(),
                     quantity: Number(item.quantity),
                     unitPrice: Number(item.price)
                 })),
-                paperTotal
+                paperTotal,
+                notes
             })
         });
 
@@ -348,14 +434,10 @@ async function saveBill() {
         loadBills();
 
     } catch (error) {
-        alert(
-            error.message +
-            "\nCheck that Node.js and MySQL are running."
-        );
+        alert(error.message + "\nCheck that Node.js and MySQL are running.");
     }
 }
 
-// Load saved bills
 async function loadBills() {
     const history = document.getElementById("history");
 
@@ -378,27 +460,28 @@ async function loadBills() {
             const div = document.createElement("div");
             div.className = "history-item";
 
+            const lines = [
+                "Total: ₹" + formatMoney(bill.calculated_total),
+                "Status: " + bill.verification_status.replace("_", " "),
+                bill.notes ? "Notes: " + bill.notes : null,
+                new Date(bill.bill_date).toLocaleString()
+            ].filter(Boolean);
+
             const title = document.createElement("strong");
             title.textContent = "Bill #" + bill.id;
+            div.appendChild(title);
 
-            const total = document.createElement("p");
-            total.textContent =
-                "Total: ₹" + formatMoney(bill.calculated_total);
+            lines.forEach(text => {
+                const p = document.createElement("p");
+                p.textContent = text;
+                div.appendChild(p);
+            });
 
-            const status = document.createElement("p");
-            status.textContent =
-                "Status: " + bill.verification_status;
-
-            const date = document.createElement("p");
-            date.textContent = new Date(bill.bill_date).toLocaleString();
-
-            div.append(title, total, status, date);
             history.appendChild(div);
         });
 
     } catch (error) {
-        history.textContent =
-            "Could not load history. Check server and MySQL.";
+        history.textContent = "Could not load history. Check server and MySQL.";
     }
 }
 
