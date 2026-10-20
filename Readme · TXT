@@ -1,0 +1,33 @@
+SMART BILLING SYSTEM
+====================
+Scan a paper bill (OCR), extract items, calculate the total and compare it
+with the total printed on the paper. Saves bills to MySQL.
+
+REQUIREMENTS
+- Node.js 18 or newer
+- MySQL 8 (running)
+- Internet connection in the browser (Tesseract.js loads from a CDN)
+
+SETUP
+1. Open a terminal in this folder and run:   npm install
+2. Copy .env.example to .env and put your MySQL password in it.
+3. Create the database:   mysql -u root -p < schema.sql
+   (Old database? Run:  ALTER TABLE bills ADD COLUMN notes VARCHAR(255);)
+4. Start the server:   npm start
+5. Open http://localhost:3000
+
+HOW TO USE
+1. Choose a bill image, click "Scan Bill", then "Extract Items".
+2. Check every item, quantity and price in the table. Fix mistakes.
+3. Enter the total printed on the paper. The app shows MATCH or MISMATCH.
+4. Click "Save Bill". Saved bills appear under Billing History.
+
+TIPS FOR BETTER OCR
+- Use a straight, well-lit, sharp photo with no shadows.
+- Crop to the bill only.
+- OCR is never perfect: always verify the table before saving.
+
+API
+GET  /api/health   check server and database
+POST /api/bills    save a bill {items:[{name,quantity,unitPrice}], paperTotal, notes}
+GET  /api/bills    last 100 bills

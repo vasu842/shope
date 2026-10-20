@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Billing System</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+
+    <header>
+        <h1>🛒 Smart Billing System</h1>
+        <p>Scan your bill and calculate the total amount</p>
+    </header>
+
+    <main>
+
+        <section class="card">
+            <h2>Scan Bill</h2>
+
+            <input type="file" id="billImage" accept="image/*">
+
+            <button id="scanBtn" onclick="scanBill()">Scan Bill</button>
+
+            <p id="scanStatus"></p>
+
+            <textarea id="ocrText" placeholder="Scanned bill text appears here"></textarea>
+
+            <button onclick="extractItems()">Extract Items</button>
+        </section>
+
+        <section class="card">
+            <h2>Billing Calculator</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Qty</th>
+                        <th>Price</th>
+                        <th>Amount</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="itemsBody"></tbody>
+            </table>
+
+            <button onclick="addItem()">+ Add Item</button>
+
+            <h3>Calculated Total: ₹<span id="total">0.00</span></h3>
+
+            <label for="paperTotal">Total Printed on Paper:</label>
+            <input id="paperTotal" type="number" min="0" step="0.01"
+                   placeholder="Enter paper total" oninput="verifyTotal()">
+
+            <p id="verification"></p>
+
+            <label for="notes">Notes:</label>
+            <input id="notes" type="text" maxlength="255"
+                   placeholder="Customer name or notes">
+
+            <button onclick="saveBill()">Save Bill</button>
+            <button onclick="window.print()">Print Bill</button>
+        </section>
+
+        <section class="card">
+            <h2>Billing History</h2>
+            <button onclick="loadBills()">Refresh Bills</button>
+            <div id="history"></div>
+        </section>
+
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

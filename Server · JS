@@ -1,0 +1,156 @@
+require("dotenv").config();
+
+const express = require("express");
+const mysql = require("mysql2/promise");
+const cors = require("cors");
+const path = require("path");
+
+const app = express();
+
+app.use(cors());
+app.use(express.json({ limit: "1mb" }));
+app.use(express.static(path.join(__dirname, "public")));
+
+const pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10
+});
+
+class ValidationError extends Error {}
+
+const round2 = value => Math.round((value + Number.EPSILON) * 100) / 100;
+
+// Check server and database
+app.get("/api/health", async (req, res) => {
+    try {
+        await pool.query("SELECT 1");
+        res.json({ status: "Success", database: "Connected" });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Database connection failed" });
+    }
+});
+
+// Save bill
+app.post("/api/bills", async (req, res) => {
+    let connection;
+
+    try {
+        const { items, paperTotal, notes } = req.body;
+
+        if (!Array.isArray(items) || items.length === 0) {
+            throw new ValidationError("Add at least one item");
+        }
+
+        const cleanItems = items.map(item => {
+            const name = String(item.name || "").trim().slice(0, 255);
+            const quantity = Number(item.quantity);
+            const price = Number(item.unitPrice);
+
+            if (
+                !name ||
+                !Number.isFinite(quantity) || quantity <= 0 ||
+                !Number.isFinite(price) || price < 0
+            ) {
+                throw new ValidationError("Invalid item details");
+            }
+
+            return { name, quantity, price, amount: round2(quantity * price) };
+        });
+
+        const total = round2(
+            cleanItems.reduce((sum, item) => sum + item.amount, 0)
+        );
+
+        const paper = paperTotal === "" || paperTotal == null
+            ? null
+            : Number(paperTotal);
+
+        if (paper !== null && (!Number.isFinite(paper) || paper < 0)) {
+            throw new ValidationError("Invalid paper total");
+        }
+
+        const status = paper === null
+            ? "NOT_PROVIDED"
+            : Math.abs(paper - total) < 0.01 ? "MATCH" : "MISMATCH";
+
+        const cleanNotes = String(notes || "").trim().slice(0, 255) || null;
+
+        connection = await pool.getConnection();
+        await connection.beginTransaction();
+
+        const [result] = await connection.execute(
+            `INSERT INTO bills
+             (paper_total, calculated_total, verification_status, notes)
+             VALUES (?, ?, ?, ?)`,
+            [paper, total, status, cleanNotes]
+        );
+
+        const billId = result.insertId;
+
+        await connection.query(
+            `INSERT INTO bill_items
+             (bill_id, item_name, quantity, unit_price, line_total)
+             VALUES ?`,
+            [cleanItems.map(i => [billId, i.name, i.quantity, i.price, i.amount])]
+        );
+
+        await connection.commit();
+
+        res.status(201).json({
+            message: "Bill saved successfully",
+            billId,
+            total,
+            paperTotal: paper,
+            status
+        });
+
+    } catch (error) {
+        if (connection) {
+            try { await connection.rollback(); } catch (e) { /* ignore */ }
+        }
+
+        if (error instanceof ValidationError) {
+            return res.status(400).json({ error: error.message });
+        }
+
+        console.error(error);
+        res.status(500).json({ error: "Could not save bill" });
+
+    } finally {
+        if (connection) connection.release();
+    }
+});
+
+// Get saved bills
+app.get("/api/bills", async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            "SELECT * FROM bills ORDER BY id DESC LIMIT 100"
+        );
+        res.json(rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Could not load bills" });
+    }
+});
+
+// Unknown API routes
+app.use("/api", (req, res) => {
+    res.status(404).json({ error: "Not found" });
+});
+
+// Open website
+app.get("*", (req, res) => {
+    res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`Smart Billing running at http://localhost:${PORT}`);
+});
