@@ -98,35 +98,113 @@ function updateTotal() {
     verifyTotal();
 }
 
-function verifyTotal() {
-    const input = document.getElementById("paperTotal").value;
+// Explain WHY the totals differ (paperDiff = paper - calculated)
+function getHints(diff, calculated) {
+    const hints = [];
+    const abs = Math.abs(diff);
+
+    // GST / tax added on the paper bill
+    if (diff > 0 && calculated > 0) {
+        [5, 12, 18, 28].forEach(rate => {
+            const tax = money(calculated * rate / 100);
+            if (Math.abs(tax - diff) < 1) {
+                hints.push("Difference matches " + rate + "% GST (₹" +
+                    formatMoney(tax) + "). The paper total may include tax.");
+            }
+        });
+    }
+
+    if (diff > 0) {
+        hints.push("An item worth about ₹" + formatMoney(abs) +
+            " may be missing from the table.");
+    }
+
+    if (diff < 0) {
+        items.forEach(item => {
+            const q = Number(item.quantity);
+            const price = Number(item.price);
+            const amount = money(q * price);
+
+            if (Math.abs(amount - abs) < 0.51) {
+                hints.push('"' + (item.name || "Unnamed item") + '" (₹' +
+                    formatMoney(amount) + ") may be extra or duplicated.");
+            }
+
+            if (q > 1 && Math.abs(money((q - 1) * price) - abs) < 0.51) {
+                hints.push('"' + (item.name || "Unnamed item") +
+                    '": the price may already be the line amount, so ' +
+                    "quantity is counted twice.");
+            }
+        });
+
+        if (calculated > 0) {
+            const pct = abs / calculated * 100;
+            if (pct >= 1 && pct <= 50) {
+                hints.push("The paper total is " + pct.toFixed(1) +
+                    "% lower. A discount may have been applied.");
+            }
+        }
+    }
+
+    hints.push("Check each item's quantity and price against the paper bill.");
+    return hints;
+}
+
+function setVerification(kind, message, hints = []) {
     const result = document.getElementById("verification");
 
+    result.className = kind;          // neutral | ok | warn | bad
+    result.textContent = message;
+
+    if (hints.length > 0) {
+        const list = document.createElement("ul");
+        hints.forEach(text => {
+            const li = document.createElement("li");
+            li.textContent = text;
+            list.appendChild(li);
+        });
+        result.appendChild(list);
+    }
+}
+
+// Compare the paper total with the calculated total
+function verifyTotal() {
+    const input = document.getElementById("paperTotal").value;
+
     if (input === "") {
-        result.textContent = "Enter the total printed on the paper bill.";
-        result.style.color = "#475569";
+        setVerification("neutral", "Enter the total printed on the paper bill.");
         return;
     }
 
     const paper = Number(input);
 
     if (!Number.isFinite(paper) || paper < 0) {
-        result.textContent = "Enter a valid paper total.";
-        result.style.color = "#dc2626";
+        setVerification("bad", "Enter a valid paper total.");
         return;
     }
 
     const calculated = calculateTotal();
+    const diff = money(paper - calculated);
+    const abs = Math.abs(diff);
 
-    if (Math.abs(paper - calculated) < 0.01) {
-        result.textContent = "✓ MATCH — Both totals are ₹" + formatMoney(calculated);
-        result.style.color = "#15803d";
+    if (abs < 0.01) {
+        setVerification("ok",
+            "✓ MATCH — Both totals are ₹" + formatMoney(calculated));
+
+    } else if (abs < 1) {
+        setVerification("warn",
+            "≈ ROUNDING — Paper: ₹" + formatMoney(paper) +
+            " | Calculated: ₹" + formatMoney(calculated) +
+            " | Difference: ₹" + formatMoney(abs) +
+            " (looks like bill rounding)");
+
     } else {
-        result.textContent =
+        setVerification("bad",
             "⚠ MISMATCH — Paper: ₹" + formatMoney(paper) +
             " | Calculated: ₹" + formatMoney(calculated) +
-            " | Difference: ₹" + formatMoney(Math.abs(paper - calculated));
-        result.style.color = "#dc2626";
+            " | Difference: ₹" + formatMoney(abs) +
+            (diff > 0 ? " (paper is higher)" : " (calculated is higher)"),
+            getHints(diff, calculated));
     }
 }
 
@@ -384,7 +462,7 @@ async function loadBills() {
 
             const lines = [
                 "Total: ₹" + formatMoney(bill.calculated_total),
-                "Status: " + bill.verification_status,
+                "Status: " + bill.verification_status.replace("_", " "),
                 bill.notes ? "Notes: " + bill.notes : null,
                 new Date(bill.bill_date).toLocaleString()
             ].filter(Boolean);

@@ -74,9 +74,13 @@ app.post("/api/bills", async (req, res) => {
             throw new ValidationError("Invalid paper total");
         }
 
+        // MATCH: exact | ROUNDING: under ₹1 apart | MISMATCH: ₹1 or more
+        const difference = paper === null ? 0 : Math.abs(paper - total);
         const status = paper === null
             ? "NOT_PROVIDED"
-            : Math.abs(paper - total) < 0.01 ? "MATCH" : "MISMATCH";
+            : difference < 0.01 ? "MATCH"
+            : difference < 1 ? "ROUNDING"
+            : "MISMATCH";
 
         const cleanNotes = String(notes || "").trim().slice(0, 255) || null;
 
@@ -106,6 +110,7 @@ app.post("/api/bills", async (req, res) => {
             billId,
             total,
             paperTotal: paper,
+            difference: round2(difference),
             status
         });
 
